@@ -31,13 +31,14 @@ def main():
     facts = load("layers/facts.json")
     events = load("layers/events.json")
 
-    # Validate against the header counts in the files.
-    assert len(graph["nodes"]) == graph["node_count"] == 22, graph["node_count"]
-    assert len(graph["edges"]) == graph["edge_count"] == 14, graph["edge_count"]
-    assert summaries["count"] == len(summaries["summaries"]) == 2
-    assert facts["count"] == len(facts["facts"]) == 11
-    assert events["count"] == len(events["events"]) == 4
-    assert timeline["event_count"] == len(timeline["events"]) == 4
+    # Validate internal consistency (counts are dynamic now: Omi
+    # conversations and Screenpipe sessions both land in the layers).
+    assert len(graph["nodes"]) == graph["node_count"], graph["node_count"]
+    assert len(graph["edges"]) == graph["edge_count"], graph["edge_count"]
+    assert summaries["count"] == len(summaries["summaries"])
+    assert facts["count"] == len(facts["facts"])
+    assert events["count"] == len(events["events"])
+    assert timeline["event_count"] == len(timeline["events"])
 
     embedded = {
         "graph": graph,
@@ -58,7 +59,9 @@ def main():
     out = pathlib.Path(__file__).resolve().parent / "panel.html"
     out.write_text(html, encoding="utf-8")
     print(f"Wrote {out}")
-    print("counts: summaries=2 facts=11 events=4 nodes=22 edges=14")
+    print(f"counts: summaries={summaries['count']} facts={facts['count']} "
+          f"events={events['count']} nodes={graph['node_count']} "
+          f"edges={graph['edge_count']}")
 
 TEMPLATE = r"""<!doctype html>
 <html lang="zh-CN">
@@ -124,7 +127,7 @@ TEMPLATE = r"""<!doctype html>
 
   <section id="tab-graph" class="active">
     <h2>图谱 <span class="legend" id="graphMeta"></span></h2>
-    <p class="hint">点击一个节点，下面会显示它的类型、来源对话、相连的关系，以及提到它的事实。颜色：话题=蓝，考试=橙，地点=绿，其他=灰。</p>
+    <p class="hint">点击一个节点，下面会显示它的类型、来源、相连的关系，以及提到它的事实。颜色：话题=蓝，考试=橙，地点=绿，其他=灰。</p>
     <svg id="graphSvg" width="100%" viewBox="0 0 960 560" role="img" aria-label="实体关系图"></svg>
     <div id="nodeDetail"></div>
     <h3>关系列表</h3>
@@ -133,7 +136,7 @@ TEMPLATE = r"""<!doctype html>
 
   <section id="tab-timeline">
     <h2>时间线</h2>
-    <p class="hint">有日期的事件按日期排在前面，没有明确日期的事件排在最后。现在 4 个事件都没有明确日期，所以都在“未注明日期”里。</p>
+    <p class="hint">有日期的事件按日期排在前面，没有明确日期的事件排在最后（“未注明日期”里）。</p>
     <div id="timelineList"></div>
   </section>
 
@@ -223,7 +226,7 @@ async function tryFetchLive() {
 function renderCounts() {
   const g = DATA.graph, s = DATA.summaries, f = DATA.facts, e = DATA.events;
   document.getElementById("counts").innerHTML =
-    "<span class='chip'>对话 " + (s.summaries ? s.summaries.length : 0) + "</span>"
+    "<span class='chip'>来源条目 " + (s.summaries ? s.summaries.length : 0) + "</span>"
     + "<span class='chip'>摘要 " + s.count + "</span>"
     + "<span class='chip'>事实 " + f.count + "</span>"
     + "<span class='chip'>事件 " + e.count + "</span>"
@@ -262,7 +265,7 @@ function renderGraph() {
   });
   document.getElementById("edgeList").innerHTML = edges.map((ed) =>
     "<div class='card'>" + esc(ed.source) + " — " + esc(ed.relation) + " → " + esc(ed.target)
-    + "<div class='meta'>来源对话：" + ed.sources.map(esc).join(", ") + "</div></div>").join("");
+    + "<div class='meta'>来源：" + ed.sources.map(esc).join(", ") + "</div></div>").join("");
 }
 
 function showNode(nodeId) {
@@ -273,7 +276,7 @@ function showNode(nodeId) {
     f.fact.includes(nodeId) || f.sources.some((s) => n.sources.includes(s)));
   document.getElementById("nodeDetail").innerHTML =
     "<div class='detail'><b>" + esc(n.label) + "</b> · 类型：" + esc(n.type)
-    + "<br>来源对话：" + n.sources.map(esc).join(", ")
+    + "<br>来源：" + n.sources.map(esc).join(", ")
     + "<br>相连关系：" + (relatedEdges.map((e) => esc(e.source + " — " + e.relation + " → " + e.target)).join("；") || "无")
     + "<br>相关事实：" + (relatedFacts.length ? "<ul>" + relatedFacts.map((f) => "<li>" + esc(f.fact) + "</li>").join("") + "</ul>" : "无直接匹配的事实。")
     + "</div>";
@@ -297,7 +300,7 @@ function renderTimeline() {
       + "<button class='del' type='button' data-del='event' data-sid='" + esc(sid) + "' data-label='" + esc(ev.description.slice(0, 20)) + "'>删除</button>"
       + "<b>" + esc(ev.date || "未注明日期") + "</b>" + (ev.source_date ? " · 对话日期 " + esc(ev.source_date) : "")
       + "<div>" + esc(ev.description) + "</div>"
-      + "<div class='meta'>" + esc(ev.title || "") + " · 来源对话：" + esc(sid) + "</div>"
+      + "<div class='meta'>" + esc(ev.title || "") + " · 来源：" + esc(sid) + "</div>"
       + "<div class='delbox-slot'></div></div>";
   }).join("") || "<p class='empty'>暂无事件。</p>";
   bindDeleteButtons(document.getElementById("timelineList"));
@@ -310,7 +313,7 @@ function renderSummaries(q) {
       + "<button class='del' type='button' data-del='summary' data-sid='" + esc(s.conversation_id) + "' data-label='" + esc(s.title) + "'>删除</button>"
       + "<b>" + highlight(s.title, q) + "</b> · " + esc(s.date || "")
       + "<div>" + highlight(s.summary, q) + "</div>"
-      + "<div class='meta'>来源对话：" + esc(s.conversation_id) + "（" + shortId(s.conversation_id) + "）</div>"
+      + "<div class='meta'>来源：" + esc(s.conversation_id) + "（" + shortId(s.conversation_id) + "）</div>"
       + "<div class='delbox-slot'></div></div>";
   }).join("");
   bindDeleteButtons(document.getElementById("summaryList"));
@@ -322,7 +325,7 @@ function renderFacts(q) {
     return "<div class='card' data-search='" + esc(text) + "'>"
       + "<button class='del' type='button' data-del='fact' data-sid='" + esc(f.sources[0] || "") + "' data-label='事实" + (i + 1) + "'>删除</button>"
       + "<b>事实 " + (i + 1) + "</b><div>" + highlight(f.fact, q) + "</div>"
-      + "<div class='meta'>来源对话：" + f.sources.map(esc).join(", ") + "</div>"
+      + "<div class='meta'>来源：" + f.sources.map(esc).join(", ") + "</div>"
       + "<div class='delbox-slot'></div></div>";
   }).join("");
   bindDeleteButtons(document.getElementById("factList"));
@@ -334,7 +337,7 @@ function renderEvents(q) {
     return "<div class='card' data-search='" + esc(text) + "'>"
       + "<button class='del' type='button' data-del='event' data-sid='" + esc(ev.source_id || "") + "' data-label='" + esc(ev.description.slice(0, 20)) + "'>删除</button>"
       + "<b>" + esc(ev.date || "未注明日期") + "</b><div>" + highlight(ev.description, q) + "</div>"
-      + "<div class='meta'>" + esc(ev.title || "") + " · 来源对话：" + esc(ev.source_id || "") + "</div>"
+      + "<div class='meta'>" + esc(ev.title || "") + " · 来源：" + esc(ev.source_id || "") + "</div>"
       + "<div class='delbox-slot'></div></div>";
   }).join("");
   bindDeleteButtons(document.getElementById("eventList"));

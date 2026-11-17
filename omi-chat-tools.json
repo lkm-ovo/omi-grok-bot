@@ -1,0 +1,8 @@
+{
+  "tools": [],
+  "chat_messages": {
+    "enabled": true,
+    "target": "main",
+    "notify": true
+  }
+}
